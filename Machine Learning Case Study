@@ -1,0 +1,283 @@
+import os
+import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import pickle
+from sklearn.manifold import TSNE
+from sklearn import preprocessing
+import pandas as pd
+
+from sklearn.linear_model import SGDClassifier
+from xgboost import XGBClassifier
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import precision_score, recall_score, confusion_matrix, classification_report, accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import roc_curve, auc
+from imblearn.over_sampling import SMOTE
+
+# Loading the dataset
+data = pd.read_csv("European_bank_marketing.csv")
+
+# Eliminate duplicates
+data_dup = data[data.duplicated(keep="last")]
+data = data.drop_duplicates()
+
+# Separate inpedendent and target variables
+y = data['term_deposit']
+data_y = y
+col = data.columns.values.tolist()
+col.remove('term_deposit')
+data_x = data[col].copy()
+
+#Create Dummies for each categorical variable.
+#data = pd.get_dummies(data, columns =['job', 'marital','education', 'default', 'housing', 'loan','contact','month','day_of_week','poutcome'])
+data_x = pd.get_dummies(data_x, columns =['month','day_of_week', 'job', 'marital','education', 'default', 'housing', 'loan','contact','poutcome'])
+
+# split train and test data sets
+X_train, X_test = train_test_split(data_x, test_size=0.3, shuffle=False)
+y_train, y_test = train_test_split(data_y, test_size=0.3, shuffle=False)
+
+# C is the regularization parameter. The strength of the regularization is inversely proportional to C.
+# The higher alpha,the higher possibility it will overfit.
+# Use AUC to defined the optimal alpha
+
+alpha = [10 ** x for x in range(-3, 4)]
+
+roc_auc_array=[]
+
+for i in alpha:
+    SVM = SVC(C=i,class_weight='balanced')
+    
+    SVM.fit(X_train,y_train)
+    
+    sig_clf = CalibratedClassifierCV(SVM, method="sigmoid")
+    
+    sig_clf.fit(X_train, y_train)
+    
+    predict_y = sig_clf.predict_proba(X_test)
+    
+    predict_y = np.argmax(predict_y, axis=1)
+    
+    roc_auc_array.append(roc_auc_score(y_test, predict_y))
+
+for i in range(len(roc_auc_array)):
+    
+    print ('AUC for C = ',alpha[i],'is',roc_auc_array[i])
+    
+best_alpha = np.argmax(roc_auc_array)
+fig, ax = plt.subplots()
+ax.plot(alpha, roc_auc_array,c='blue')
+for i, txt in enumerate(np.round(roc_auc_array,3)):
+    ax.annotate((alpha[i],np.round(txt,3)), (alpha[i],roc_auc_array[i]))
+
+plt.grid()
+plt.title("AUC for each C")
+plt.xlabel("C")
+plt.ylabel("AUC")
+plt.show()
+
+# best_alpha = np.argmax(roc_auc_array)
+
+SVM = SVC(C=alpha[best_alpha],class_weight='balanced')
+    
+SVM.fit(X_train,y_train)
+    
+sig_clf = CalibratedClassifierCV(SVM, method="sigmoid")
+    
+sig_clf.fit(X_train, y_train)
+    
+predict_y = sig_clf.predict_proba(X_test)
+
+predict_y = np.argmax(predict_y, axis=1)
+
+# info about SVM model with the optimal C.
+
+test_score = sig_clf.score(X_test, y_test)
+
+print('test score:',test_score)
+
+score_Accuracy = accuracy_score(y_test, predict_y)
+
+print('Accuracy Score is:', score_Accuracy)
+    
+F1_score = f1_score(y_test,predict_y)
+
+print('F1 Score is:', F1_score)
+
+ROC_AUC = roc_auc_score(y_test, predict_y)
+
+print('ROC_AUC Score:', ROC_AUC)
+    
+cm_df = pd.DataFrame(confusion_matrix(y_test, predict_y).T, index=sig_clf.classes_, columns=sig_clf.classes_)
+
+print('\n Confusion Matrix:\n {}'.format(cm_df))
+    
+print('\n Classification Report:\n {}'.format(classification_report(y_test, predict_y)))
+
+
+test_fpr, test_tpr, _ = roc_curve(y_test,predict_y)
+    
+auc = roc_auc_score(y_test,predict_y)
+
+#create ROC curve
+plt.plot(test_fpr,test_tpr,label="AUC="+str(auc))
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.title('ROC')
+plt.legend(loc=4)
+plt.show()
+
+# Oversampling 
+sm = SMOTE(sampling_strategy='minority', random_state=1)
+oversampled_X_train, oversampled_y_train = sm.fit_resample(X_train, y_train)
+oversampled_X_test, oversampled_y_test = sm.fit_resample(X_test, y_test)
+
+# Again, find the optimal C based on an oversampled data set
+alpha = [10 ** x for x in range(-3, 4)]
+
+roc_auc_array=[]
+
+for i in alpha:
+    SVM = SVC(C=i,class_weight='balanced')
+    
+    SVM.fit(oversampled_X_train,oversampled_y_train)
+    
+    sig_clf = CalibratedClassifierCV(SVM, method="sigmoid")
+    
+    sig_clf.fit(oversampled_X_train, oversampled_y_train)
+    
+    predict_y = sig_clf.predict_proba(X_test)
+    
+    predict_y = np.argmax(predict_y, axis=1)
+    
+    roc_auc_array.append(roc_auc_score(y_test, predict_y))
+
+for i in range(len(roc_auc_array)):
+    
+    print ('AUC for C = ',alpha[i],'is',roc_auc_array[i])
+    
+best_alpha = np.argmax(roc_auc_array)
+fig, ax = plt.subplots()
+ax.plot(alpha, roc_auc_array,c='blue')
+for i, txt in enumerate(np.round(roc_auc_array,3)):
+    ax.annotate((alpha[i],np.round(txt,3)), (alpha[i],roc_auc_array[i]))
+
+plt.grid()
+plt.title("AUC for each C")
+plt.xlabel("C")
+plt.ylabel("AUC")
+plt.show()
+
+# test on oversampled data(impossible in rea life)
+# best_alpha = np.argmax(roc_auc_array)
+
+SVM = SVC(C=alpha[best_alpha],class_weight='balanced')
+    
+SVM.fit(oversampled_X_train,oversampled_y_train)
+    
+sig_clf = CalibratedClassifierCV(SVM, method="sigmoid")
+    
+sig_clf.fit(oversampled_X_train, oversampled_y_train)
+    
+predict_y = sig_clf.predict_proba(oversampled_X_test)
+
+predict_y = np.argmax(predict_y, axis=1)
+
+# info about SVM model with the optimal C.
+
+test_score = sig_clf.score(oversampled_X_test, oversampled_y_test)
+
+print('test score:',test_score)
+
+score_Accuracy = accuracy_score(oversampled_y_test, predict_y)
+
+print('Accuracy Score is:', score_Accuracy)
+    
+F1_score = f1_score(oversampled_y_test,predict_y)
+
+print('F1 Score is:', F1_score)
+
+ROC_AUC = roc_auc_score(oversampled_y_test, predict_y)
+
+print('ROC_AUC Score:', ROC_AUC)
+    
+cm_df = pd.DataFrame(confusion_matrix(oversampled_y_test, predict_y).T, index=sig_clf.classes_, columns=sig_clf.classes_)
+
+print('\n Confusion Matrix:\n {}'.format(cm_df))
+    
+print('\n Classification Report:\n {}'.format(classification_report(oversampled_y_test, predict_y)))
+
+
+test_fpr, test_tpr, _ = roc_curve(oversampled_y_test,predict_y)
+    
+auc = roc_auc_score(oversampled_y_test,predict_y)
+
+#create ROC curve
+plt.plot(test_fpr,test_tpr,label="AUC="+str(auc))
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.title('ROC')
+plt.legend(loc=4)
+plt.show()
+
+# test on original test data set(real world data)
+# best_alpha = np.argmax(roc_auc_array)
+
+# SVM = SVC(C=alpha[best_alpha],class_weight='balanced')
+    
+# SVM.fit(oversampled_X_train,oversampled_y_train)
+    
+# sig_clf = CalibratedClassifierCV(SVM, method="sigmoid")
+    
+# sig_clf.fit(oversampled_X_train, oversampled_y_train)
+    
+predict_y = sig_clf.predict_proba(X_test)
+
+predict_y = np.argmax(predict_y, axis=1)
+
+# info about SVM model with the optimal C.
+
+test_score = sig_clf.score(X_test, y_test)
+
+print('test score:',test_score)
+
+score_Accuracy = accuracy_score(y_test, predict_y)
+
+print('Accuracy Score is:', score_Accuracy)
+    
+F1_score = f1_score(y_test,predict_y)
+
+print('F1 Score is:', F1_score)
+
+ROC_AUC = roc_auc_score(y_test, predict_y)
+
+print('ROC_AUC Score:', ROC_AUC)
+    
+cm_df = pd.DataFrame(confusion_matrix(y_test, predict_y).T, index=sig_clf.classes_, columns=sig_clf.classes_)
+
+print('\n Confusion Matrix:\n {}'.format(cm_df))
+    
+print('\n Classification Report:\n {}'.format(classification_report(y_test, predict_y)))
+
+
+test_fpr, test_tpr, _ = roc_curve(y_test,predict_y)
+    
+auc = roc_auc_score(y_test,predict_y)
+
+#create ROC curve
+plt.plot(test_fpr,test_tpr,label="AUC="+str(auc))
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.title('ROC')
+plt.legend(loc=4)
+plt.show()
